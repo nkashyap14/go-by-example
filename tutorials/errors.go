@@ -16,9 +16,11 @@ func f(arg int) (int, error) {
 }
 
 
+//sentinel errors: predeclared values that are used to signify a specific error condition
 var ErrOutOfTea = fmt.Errorf("no more tea available")
 var ErrPower = fmt.Errorf("can't boil water")
 
+//are wrapping errors with fmt.Errorf and the %w verb to add context. Wrapper errors create a logical chain that can be queried iwth funcitons like errors.Is and errors.As
 func makeTea(arg int) error {
 	if arg == 2 {
 		return ErrOutOfTea
@@ -37,6 +39,7 @@ func main() {
 		}
 	}
 
+	//error.sis checks that a given error matches a specific error value
 	for i := range 5 {
 		if err := makeTea(i); err != nil {
 			if errors.Is(err, ErrOutOfTea) {
