@@ -1,0 +1,27 @@
+- n databases
+    -database class
+    -serverid
+- databases get mapped on a ring
+- each database gets i virtual nodes
+    -set up the database with goroutines
+    -use a waitgroup to sync up
+    -utilize an atomic counter to sync up the amount of databases created
+- i * n virtual nodes mapped on a ring
+- ring should be a sufficiently large circle:
+    -function should exist that maps it in euclidean space
+    -correspondingly there should be a position in that euclidean space for each of the vnodes
+        -as such it should hold a mapping of vnodes to positions
+            -or should the vnode hold its own position?
+                -no because the vnode is not what is doing the mapping to the vnode. the vnode can be associated with any of the dbs
+        -also should hold a mapping of data to vnode:
+            -how this is done is a hash of the data is created and then that calculates a position on the ring
+- sample data: lets assume its a banking app:
+    -set up a sample data struct
+-hashing function:
+    -golang lets focus on sha-256
+-also implement use cases of adding a database
+    -keys should be automatically adjusted
+    -log the keys that are moved from db x to db y
+-also implement the use case of removing a db
+    -keys should be automatically removed
+    -log the keys that are moved from db x to db y
