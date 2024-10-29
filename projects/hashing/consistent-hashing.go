@@ -18,6 +18,10 @@ func DefaultHash(key string) uint32 {
 	return binary.BigEndian.Uint32(hash[:4])
 }
 
+func generateVNodeKey(serverId, index int) string {
+	return fmt.Sprintf("%d-%d", serverId, index)
+}
+
 //data record
 type data struct {
 	FirstName string
@@ -81,20 +85,59 @@ func NewRing(partitions, replicationFactor int, hashFunc HashFunc) *ring {
 	}
 }
 
-func (r ring) RemoveDB(db database) bool {
+func (r ring) RemoveDB(db *database) error {
 	//removes all vnodes of serverId from the ring
+
+	if _, exists := r.databases[db.serverid]; !exists {
+		return fmt.Errorf("Database with Server ID %d does not exist", db.serverid)
+	}
+
+	delete(r.mapping, serverId)
+
+	delete(r.databases, serverId)
+
+	//r.rebalance()
+	
+	//no error occured so we return nil
+	return nil
 }
 
 //server
-func (r ring) AddDb(db database) {
-	//takes the db gets a hash
-	//mods the hash by perimeter of the ring, multiplies it from 1 -n where n is the replication factor and sets a vnode at each of those points
-	// vnode is (n - 1) * hash % perimeter 
+func (r *ring) AddDB(db *database) error {
+
+	//when we look up a key in a map it returns two values, the value and a boolean indicating whether it is found or not
+	//we are taking the booleanin this case and setting it to exists and initiating the block off the value of exists
+	if _, exists := r.databases[db.serverid]; exists {
+		return fmt.Errorf("Database with Server ID %d already exists", db.serverid)
+	}
+
+	//Store the database in the database map
+	r.databases[db.serverid] = db
+
+	//create the vnodes for the database
+	vNodes := make([]vNode, 0, r.replicationFactor)
+
+	for i := 0; i < r.replicationFactor; i++ {
+		key := generateVNodeKey(db.serverid, i)
+		hash := r.hashfunc(key)
+
+		vNodes = append(vNodes, vNode{
+			ServerId : db.serverid, 
+			HashPosition: hash
+		})
+	}
+
+	r.mapping[db.serverid] = vNodes
+	
+	//r.rebalance()
+
+	//no error occurred so we return nil
+	return nil
 
 }
 
 //internal rebalancing function that gets called by AddDB and RemoveDB to adjust the mappings of data to database
-func (r ring) rebalance() {
+func (r *ring) rebalance() {
 }
 
 func main() {
