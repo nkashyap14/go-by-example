@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math"
 	"crypto/md5"
+	"sort"
+	"encoding/binary"
 )
 
 //defined signature for hashing functions
@@ -22,15 +24,6 @@ func generateVNodeKey(serverId, index int) string {
 	return fmt.Sprintf("%d-%d", serverId, index)
 }
 
-//data record
-type data struct {
-	FirstName string
-	LastName string
-	Savings string
-	Checking string
-	Four01k string
-}
-
 type vNode struct {
 	//serverId the vNode corresponds to
 	ServerId int
@@ -46,7 +39,7 @@ type ring struct {
 	replicationFactor int
 	//represents the total size of our hash space
 	hashSpace uint32
-	hashfunc HashFunc
+	hashFunc HashFunc
 }
 
 type database struct {
@@ -59,8 +52,22 @@ type database struct {
 //set it up with first name, last name, savings account balance, checkings balance,
 //and 401k.
 type data struct {
-	first_name, last_name string
+	FirstName, LastName string
 	savings, checkings, four01k float64
+	hashPosition uint32
+}
+
+// Function to create a new record with pre-calculated hash
+func NewRecord(firstName, lastName string, savings, checkings, four01k float64, hashFunc HashFunc) data {
+    key := firstName + lastName
+    return data{
+        FirstName:    firstName,
+        LastName:     lastName,
+        savings:      savings,
+        checkings:    checkings,
+        four01k:      four01k,
+        hashPosition: hashFunc(key),
+    }
 }
 
 func NewRing(partitions, replicationFactor int, hashFunc HashFunc) *ring {
@@ -81,7 +88,7 @@ func NewRing(partitions, replicationFactor int, hashFunc HashFunc) *ring {
 		databases: make(map[int]*database),
 		replicationFactor: replicationFactor,
 		hashSpace: math.MaxUint32,
-		hashFunc: hashFunc
+		hashFunc: hashFunc,
 	}
 }
 
@@ -92,11 +99,11 @@ func (r ring) RemoveDB(db *database) error {
 		return fmt.Errorf("Database with Server ID %d does not exist", db.serverid)
 	}
 
-	delete(r.mapping, serverId)
+	delete(r.mapping, db.serverid)
 
-	delete(r.databases, serverId)
+	delete(r.databases, db.serverid)
 
-	//r.rebalance()
+	r.rebalance()
 	
 	//no error occured so we return nil
 	return nil
@@ -119,17 +126,17 @@ func (r *ring) AddDB(db *database) error {
 
 	for i := 0; i < r.replicationFactor; i++ {
 		key := generateVNodeKey(db.serverid, i)
-		hash := r.hashfunc(key)
+		hash := r.hashFunc(key)
 
 		vNodes = append(vNodes, vNode{
 			ServerId : db.serverid, 
-			HashPosition: hash
+			HashPosition: hash,
 		})
 	}
 
 	r.mapping[db.serverid] = vNodes
 	
-	//r.rebalance()
+	r.rebalance()
 
 	//no error occurred so we return nil
 	return nil
@@ -137,7 +144,69 @@ func (r *ring) AddDB(db *database) error {
 }
 
 //internal rebalancing function that gets called by AddDB and RemoveDB to adjust the mappings of data to database
-func (r *ring) rebalance() {
+func (r *ring) rebalance() error {
+
+	if len(r.databases) <= 1 {
+		return nil
+	}
+
+	allVNodes := make([]vNode, 0)
+
+	//collect alll the vnodes
+	for _, nodes := range r.mapping {
+		allVNodes = append(allVNodes, nodes...)
+	}
+
+
+	//sort the vnodes by their hash position on the ring in order to determine what records get moved
+	sort.Slice(allVNodes, func(i, j int) bool {
+		return allVNodes[i].HashPosition < allVNodes[j].HashPosition
+	})
+
+	for i, vnode := range allVNodes {
+		prevIndex := (i - 1 + len(allVNodes)) % len(allVNodes)
+		startPos := allVNodes[prevIndex].HashPosition
+		endPos := vnode.HashPosition
+
+		//get db responsible for this range
+		responsibleDB := r.databases[vnode.ServerId]
+
+		for dbID, db := range r.databases {
+			if dbID == vnode.ServerId {
+				continue //can skip responsiblie db
+			}
+
+			//get the records that have to be moved
+			recordsToMove := make([]data, 0)
+			records := make([]data, 0)
+
+			for _, record := range db.records {
+				hashPos := record.hashPosition
+
+				belongsInRange := false
+
+				if startPos < endPos {
+					belongsInRange = hashPos > startPos && hashPos <= endPos
+				} else { //in the case that the vnodes are wrapping around
+					belongsInRange = hashPos > startPos || hashPos <= endPos
+				}
+
+				if belongsInRange {
+					recordsToMove = append(recordsToMove, record)
+				} else {
+					records = append(records, record)
+				}
+			}
+
+			if len(recordsToMove) > 0 {
+				db.records = records
+				responsibleDB.records = append(responsibleDB.records, recordsToMove...)
+
+			}
+		}
+	}
+
+	return nil
 }
 
 func main() {
