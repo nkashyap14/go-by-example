@@ -6,6 +6,7 @@ import (
 	"crypto/md5"
 	"sort"
 	"encoding/binary"
+	"sync"
 )
 
 //defined signature for hashing functions
@@ -45,6 +46,7 @@ type ring struct {
 type database struct {
 	serverid int
 	records []data
+	mu sync.Mutex
 }
 
 
@@ -60,6 +62,9 @@ type data struct {
 // Function to create a new record with pre-calculated hash
 func NewRecord(firstName, lastName string, savings, checkings, four01k float64, hashFunc HashFunc) data {
     key := firstName + lastName
+	if hashFunc == nil {
+		hashFunc = DefaultHash
+	}
     return data{
         FirstName:    firstName,
         LastName:     lastName,
@@ -70,13 +75,9 @@ func NewRecord(firstName, lastName string, savings, checkings, four01k float64, 
     }
 }
 
-func NewRing(partitions, replicationFactor int, hashFunc HashFunc) *ring {
+func NewRing(replicationFactor int, hashFunc HashFunc) *ring {
 	if replicationFactor > 10 {
 		replicationFactor = 10
-	}
-
-	if partitions > 100 {
-		partitions = 100
 	}
 
 	if hashFunc == nil {
@@ -209,5 +210,45 @@ func (r *ring) rebalance() error {
 	return nil
 }
 
+func (r *ring) getResponsibleDB(hash uint32) (*database, error) {
+
+	if len(r.databases) == 0 {
+		return nil, fmt.Errorf("No databases available")
+	}
+
+	allVNodes := make([]vNode, 0)
+	for _, nodes := range r.mapping {
+		allVNodes = append(allVNodes, nodes...)
+	}
+
+	sort.Slice(allVNodes, func(i, j int) bool {
+		return allVNodes[i].HashPosition < allVNodes[j].HashPosition
+	})
+
+	for _, vnode := range allVNodes {
+		if vnode.HashPosition >= hash {
+			return r.databases[vnode.ServerId], nil
+		}
+	}
+
+	//wrap around case
+	return r.databases[allVNodes[0].ServerId], nil
+}
+
+
+func (r *ring) addRecord(record data) error {
+	db, err := r.getResponsibleDB(record.hashPosition)
+
+	if err != nil {
+		return fmt.Errorf("Errored out with %s", err)
+	}
+
+	db.mu.Lock()
+	defer db.mu.Unlock() //will unlock it when the function exits
+
+	db.records = append(db.records, record)
+
+	return nil
+}
 func main() {
 }
