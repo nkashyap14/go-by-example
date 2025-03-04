@@ -93,7 +93,7 @@ func NewRing(replicationFactor int, hashFunc HashFunc) *ring {
 	}
 }
 
-func (r ring) RemoveDB(db *database) error {
+func (r *ring) RemoveDB(db *database) error {
 	//removes all vnodes of serverId from the ring
 
 	if _, exists := r.databases[db.serverid]; !exists {
